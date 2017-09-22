@@ -1,0 +1,163 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+var app = require('../app');
+var debug = require('debug')('demo1:server');
+var http = require('http');
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app);
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
+
+var io = require('socket.io')(server);
+var Message = require('../control/db').modelUser2;
+var _ = require('underscore')
+global.users = {}
+global.loginuser = {}
+io.on('connection', function (socket) {
+    socket.on('message', function (obj) {
+        var mess = {
+            username: obj.username,
+            src:obj.src,
+            msg: obj.msg,
+            img: obj.img,
+            roomid: obj.room
+        }
+        io.to(mess.roomid).emit('message', mess)
+        console.log(obj.username + '??' + mess.roomid+'??')
+            var message = new Message(mess)
+            message.save(function (err, mess) {
+                if (err) {
+                    console.log(err)
+                }
+                // console.log(mess)
+            })
+    })
+    socket.on('add',function(obj){
+        socket.emit('add',{"myself":obj.name1,friend:obj.name2})
+    })
+    socket.on('login',function(obj) {
+        socket.name = obj.user;
+        if(! global.loginuser.hasOwnProperty(obj.user)){
+            global.loginuser[obj.user] = obj;
+        }
+        io.emit('login', global.loginuser)
+        console.log(obj.user);
+    })
+    socket.on('join',function (obj) {
+        socket.name = obj.name
+        socket.room = obj.roomid
+        if (!global.users[obj.roomid]) {
+            global.users[obj.roomid] = {}
+        }
+        if(! global.users[obj.roomid].hasOwnProperty(obj.name)){
+            global.users[obj.roomid][obj.name] = obj;
+        }
+
+        socket.join(obj.roomid)
+        io.to(obj.roomid).emit('join', global.users[obj.roomid])
+        console.log(obj.name + '???' + obj.roomid+'?')
+    })
+     socket.on('email',function(obj){
+         var toName = obj.to;
+         var toSocket;
+       if(toSocket = _.findWhere(io.sockets.sockets,{name:toName})){
+           toSocket.emit('mess',obj.msg);
+       }
+
+   })
+    socket.on('logout',function (obj) {
+
+        delete  global.users[obj.roomid][obj.name]
+        console.log(obj.name + '???' + obj.roomid)
+        io.to(obj.roomid).emit('logout', global.users[obj.roomid])
+    })
+
+    socket.on('disconnect', function () {
+        if (global.users[socket.room]) {
+            delete global.users[socket.room][socket.name]
+            console.log(socket.name + '???' + socket.room)
+            io.to(socket.room).emit('logout', global.users[socket.room])
+        }
+    })
+})
